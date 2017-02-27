@@ -38,3 +38,11 @@ This assignment includes 5 problems:
 
 - Q5: Higher Level Representations: Image Features 
 
+  This part is all about the training techniques and hyperparameter search. Although the lecture recommand random search
+  for hyperparameters, I tried from coarse to fine search. That is, first pick some values with big difference and then shrink
+  the difference for those good values. I tried [1, 10, 0.1, 0.01, 100] and then [1.1, 1, 0.9] for learning rate. 
+  When the training makes no progress and the loss does not change by much, the reason I find is that the learning rate is 
+  too small; when the loss jumps too big if the batch size is small; when the loss increases, the reason is the learning rate
+  is too big. For the two-layer neural network, the regularization should be small.
+  
+
