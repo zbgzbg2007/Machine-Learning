@@ -37,4 +37,4 @@ This assignment includes 4 problems:
   [conv-relu-conv-relu-pool] x N - [affine] x M - softmax.
 
   Batch normalziation is applied between each convolutional layer and ReLU layer.
-  
+  With N = 2 and M = 1, we can obtain about 65% accuracy on validation set.
