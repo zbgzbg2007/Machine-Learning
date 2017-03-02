@@ -70,9 +70,10 @@ def rnn_step_backward(dnext_h, cache):
   
   x, Wx, prev_h, Wh, s3 = cache
   
-  #dtanh/dx = 4 * e**(-2x) / (1 + e**(-2x)) ** 2
-  f = lambda x: 4  / (np.exp(x) + np.exp(-x)) ** 2
-  ds3 = dnext_h * f(s3)
+  # dtanh/dx = 4 * e**(-2x) / (1 + e**(-2x)) ** 2
+  # dtanh/dx = 4 * sigmoid(2x) * (1-sigmoid(2x))
+  
+  ds3 = dnext_h * 4 * sigmoid(2 * s3) * (1 - sigmoid(2 * s3))
   db = np.sum(ds3, axis = 0)
   ds1 = ds3
   ds2 = ds3
@@ -259,6 +260,13 @@ def sigmoid(x):
   top[neg_mask] = z[neg_mask]
   return top / (1 + z)
 
+def derivative_sigmoid(x):
+  '''
+  A numerically stable version of the derivative of sigmoid function.
+  '''
+  return sigmoid(x) * (1 - sigmoid(x))
+
+
 
 def lstm_step_forward(x, prev_h, prev_c, Wx, Wh, b):
   """
@@ -288,7 +296,7 @@ def lstm_step_forward(x, prev_h, prev_c, Wx, Wh, b):
   H = prev_h.shape[1]
   a = np.dot(x, Wx) + np.dot(prev_h, Wh) + b
   a_i, a_f, a_o, a_g = a[:, 0:H], a[:, H:2*H], a[:, 2*H:3*H], a[:, 3*H:]
-  sigmoid = lambda x: 1 / (1 + np.exp(-x))
+  
   i, f, o, g = sigmoid(a_i), sigmoid(a_f), sigmoid(a_o), np.tanh(a_g)
   next_c = f * prev_c + i * g
   next_h = o * np.tanh(next_c)
@@ -330,9 +338,7 @@ def lstm_step_backward(dnext_h, dnext_c, cache):
   x, prev_c, prev_h, Wx, Wh, a, i, f, o, g, next_c = cache
   do = dnext_h * np.tanh(next_c)
   dtanh = dnext_h * o
-  derive_tanh = lambda x: 4 / (np.exp(x) + np.exp(-x)) ** 2
-  derive_sigmoid = lambda x: 1 / (np.exp(x) + np.exp(-x) + 2)
-  dnext_c += dtanh * derive_tanh(next_c)
+  dnext_c += dtanh * 4 * derivative_sigmoid(2 * next_c) 
   
   df = dnext_c * prev_c
   di = dnext_c * g
@@ -341,10 +347,10 @@ def lstm_step_backward(dnext_h, dnext_c, cache):
 
   H = dnext_h.shape[1]
   a_i, a_f, a_o, a_g = a[:, 0:H], a[:, H:2*H], a[:, 2*H:3*H], a[:, 3*H:]
-  da_i = di * derive_sigmoid(a_i)
-  da_f = df * derive_sigmoid(a_f)
-  da_o = do * derive_sigmoid(a_o)
-  da_g = dg * derive_tanh(a_g)
+  da_i = di * derivative_sigmoid(a_i)
+  da_f = df * derivative_sigmoid(a_f)
+  da_o = do * derivative_sigmoid(a_o) 
+  da_g = dg * 4 * derivative_sigmoid(2 * a_g)
   
   da = np.hstack((da_i, da_f, da_o, da_g))
   dx = np.dot(da, Wx.T)
