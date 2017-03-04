@@ -45,4 +45,8 @@ This assignment includes 4 problems:
   activations in that layer. 
   We also tried another idea discribed at the end of the page https://github.com/google/deepdream/blob/master/dream.ipynb .
   That is to guide the partterns in the result by another guide image. The method is to maximize the dot product between the 
-  activations of our current image and their best matching activations from the guide image. 
+  activations of our current image and their best matching activations from the guide image. This is the result from our 
+  implementation.
+  
+  ![DeepDreamImage]
+  (https://github.com/zbgzbg2007/Machine-Learning/blob/master/CS231n/assignment3/dream-sky)
