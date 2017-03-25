@@ -49,4 +49,4 @@ This assignment includes 4 problems:
   implementation.
   
   ![DeepDreamImage]
-  (https://github.com/zbgzbg2007/Machine-Learning/blob/master/CS231n/assignment3/dream-sky)
+  (https://github.com/zbgzbg2007/Machine-Learning/blob/master/CS231n/assignment3/dream-sky.png)
