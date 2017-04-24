@@ -5,5 +5,7 @@ Projects or classes about ML
 
 - Easy21 folder includes the assignment Easy21 from the UCL course Reinforcement Learning.
 
-- DQN folder includes the implementation of the deep Q-network, double Q-learning and deuling network for the Atari game
+- DQN folder includes my implementation of the deep Q-network, double Q-learning and deuling network for the Atari game
   Enduro based on the toolkit OpenAi gym.
+
+- A3C folder includes my implementation of the asynchronous advatage actor-critic algorithm based on the Atari game Enduro.
