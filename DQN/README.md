@@ -38,3 +38,8 @@ or [3].
 
 We implemented three kinds of architectures: a simple linear Q-network, the deep Q-network in [1, 2], the dueling network in [4].
 We also implemented the training algorithm in [1, 2] and [3]. 
+
+Note that games from openai gym is different from ALE (Arcade Learning Environment), the environment used in [1, 2]: the 
+action will be repeated 2, 3, or 4 times randomly. So the preprocessing for openai games is a little different from that 
+in the papers. 
+The architecture introduced in [1, 2] is the deep Q-network, a convolutional network as the value-action function approximator.
