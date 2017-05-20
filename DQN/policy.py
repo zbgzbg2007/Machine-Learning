@@ -127,8 +127,6 @@ class LinearDecayGreedyEpsilonPolicy(Policy):
         The value of the policy at the end of the decay.
       - decay: int
         The number of steps over which to decay the value.
-      - num_steps: int
-        The number of taken steps 
       - eps: float
         Current epsilon
       - num_actions: int
@@ -138,8 +136,7 @@ class LinearDecayGreedyEpsilonPolicy(Policy):
     def __init__(self, start_value, end_value, decay, num_actions):  
         self.start_value = start_value
         self.end_value = end_value
-        self.decay = decay
-        self.num_steps = 0
+        self.decay = float(start_value - end_value) / decay
         self.eps = start_value
         self.num_actions = num_actions
         
@@ -158,12 +155,13 @@ class LinearDecayGreedyEpsilonPolicy(Policy):
             Selected action index.
         """
         is_training = kwargs.pop('is_training', True)
-        p = GreedyEpsilonPolicy(self.eps, self.num_actions)
-        action = p.select_action(q_values)
+        x = random.uniform(0, 1) 
+        if x > self.eps:
+            action = np.argmax(q_values)
+        else:
+            action = np.random.randint(0, self.num_actions)
         if is_training:
-            self.num_steps += 1
-            if self.num_steps % self.decay and self.eps > self.end_value:
-                self.eps = 1. / self.num_steps
+            self.eps = max(self.eps - self.decay, self.end_value)
 
         return action
 
