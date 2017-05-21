@@ -126,18 +126,14 @@ def process_state(obs):
             The state after processing. Can be modified in anyway.
 
         """
-        state = obs[:160, ...] 
+        #state = obs[:160, ...] 
         # convert RGB image into grayscale
-        gray = np.dot(state, [0.299, 0.587, 0.114]) / 255.0
+        state = cv2.cvtColor(obs, cv2.COLOR_BGR2GRAY)
+
+        # resize image into 80 * 80 
+        state = cv2.resize(state[:160, :], (80, 80)) / 255.0
         
-        # downsample image by averaging 2x2 pixels into a single pixel
-        fact = 2
-        sx, sy = gray.shape
-        X, Y = np.ogrid[0:sx, 0:sy]
-        regions = sy/fact * (X/fact) + Y/fact
-        res = ndimage.mean(gray, labels=regions, index=np.arange(regions.max() + 1))
-        res = res.reshape(sx/fact, sy/fact)
-        return res
+        return state
 
 def run(game, conn, T_max, jump, window):
     '''Run a game for T_max steps
