@@ -3,6 +3,7 @@
 """
 import random
 import gym
+import cv2
 import multiprocessing
 import keras
 import numpy as np
@@ -291,7 +292,7 @@ def main():
     nums = len(eps)#multiprocessing.cpu_count()
     for i in range(nums):
         conn1, conn2 = multiprocessing.Pipe()
-        p = multiprocessing.Process(target=run, args=(game, conn2, T_max, jump[i], window, keep, keep_length[i]))
+        p = multiprocessing.Process(target=run, args=(game, conn2, T_max, jump[i], window))
         p.start()
         processors.append(p)
         conns.append(conn1)
