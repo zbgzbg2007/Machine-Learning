@@ -33,7 +33,7 @@ class ReplayMemory:
         """
 
         self.max_size = max_size
-        self.imgs = np.empty((max_size, 80, 80), dtype='uint8') 
+        self.imgs = np.empty((max_size, 80, 80), dtype='float32') 
         self.actions = np.empty(max_size, dtype='uint8') 
         self.rewards = np.empty(max_size)
         self.terminal = np.empty(max_size, dtype='bool') 
@@ -69,7 +69,7 @@ class ReplayMemory:
             A batch of sampled transitions 
         '''
         
-        imgs = np.empty((batch_size, self.window+1, 80, 80), dtype='uint8')
+        imgs = np.empty((batch_size, self.window+1, 80, 80), dtype='float32')
         act = np.empty(batch_size, dtype='int32')
         rwd = np.empty(batch_size, dtype='float32')
         tml = np.empty(batch_size, dtype='bool')

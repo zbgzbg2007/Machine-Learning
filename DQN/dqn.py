@@ -52,13 +52,10 @@ def create_model(input_shape, num_actions, model_type, window=4):
             # Construct a deep Q-network  
             model.add(Permute((2, 3, 1), input_shape=in_dim))
             model.add(Conv2D(filters=32, kernel_size=(8,8), strides=(4,4), activation='relu'))
-            #model.add(BatchNormalization())
             model.add(Conv2D(filters=64, kernel_size=(4,4), strides=(2,2), activation='relu'))
             model.add(Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), activation='relu'))
-            #model.add(BatchNormalization())
             model.add(Flatten())
             model.add(Dense(units=512, activation='relu'))
-            #model.add(BatchNormalization())
             model.add(Dense(units=num_actions))
 
     else:
@@ -66,17 +63,14 @@ def create_model(input_shape, num_actions, model_type, window=4):
         inputs = Input(shape=in_dim)
         x = Permute((2, 3, 1))(inputs)
         x = Conv2D(filters=32, kernel_size=(8,8), strides=(4,4), activation='relu')(x)
-        #x = BatchNormalization()(x)
         x = Conv2D(filters=64, kernel_size=(4,4), strides=(2,2), activation='relu')(x)
-        #x = BatchNormalization()(x)
         x = Conv2D(filters=64, kernel_size=(3,3), strides=(1,1), activation='relu')(x)
-        #x = BatchNormalization()(x)
         x = Flatten()(x)
-        val = Dense(units=512, activation='relu')(x)
-        adv = Dense(units=512, activation='relu')(x)
-        V = Dense(units=1, activation='relu')(val)
-        A = Dense(units=num_actions, activation='relu')(adv)
-        x = keras.layers.concatenate([V, A])
+        x = Dense(units=512, activation='relu')(x)
+        # next layer has a shape (num_actions+1,)
+        # y[:,0] represents V(s;theta)
+        # y[:,1:] represents A(s,a;theta)
+        x = Dense(units=num_actions+1, activation='linear')(x) 
         # last layer applies the average of advantage function 
         # modification from the paper
         Q = Lambda(lambda a: K.expand_dims(a[:, 0], axis=-1) + a[:, 1:] - K.mean(a[:, 1:], keepdims=True), output_shape=(num_actions, ))(x)
@@ -111,7 +105,7 @@ def main():
     config.gpu_options.per_process_gpu_memory_fraction = 0.25
     set_session(tf.Session(config=config))
     model_type = 'deep' 
-    output = model_type+'-double-output'+'10'
+    output = model_type+'-double-output'+'11'
     window = 4
     model1 = create_model((80, 80), num_actions, model_type=model_type, window=window)  
     model2 = create_model((80, 80), num_actions, model_type=model_type, window=window)  
