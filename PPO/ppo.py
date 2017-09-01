@@ -12,13 +12,13 @@ import torch.optim as optim
 import torch.optim.lr_scheduler as scheduler
 import torch.nn.init as init
 import torch.nn.functional as F
-import torch.multiprocessing as _mp
+import torch.multiprocessing as _mp 
 mp = _mp.get_context('spawn')
 import torch.autograd as autograd
 from torch.autograd import Variable
 import time
 import os
-import sys
+import sys 
 from collections import deque
 
 
@@ -35,19 +35,19 @@ def to_tensor(x):
 def init_weight(layer, nonlinear):
     # initialize weights
     init.xavier_uniform(layer.weight, gain=nn.init.calculate_gain(nonlinear))
-    init.constant(layer.bias, 0.)
+    init.constant(layer.bias, 0.) 
 
 class E_args(object):
     def __init__(self, eps, decay, emin, sigma, t, freq, num, gpu):
-        self.eps = eps
+        self.eps = eps 
         self.decay = decay
         self.eps_min = emin
         self.mu = to_tensor([[0.0 for i in range(num)]])
         self.theta = to_tensor([[t for i in range(num)]])
         self.sigma = to_tensor([[sigma for i in range(num)]])
         self.update_freq = freq
-        self.gpu = gpu
-        self.num_actions = num
+        self.gpu = gpu 
+        self.num_actions = num 
         if gpu:
             self.mu = self.mu.cuda()
             self.theta = self.theta.cuda()
@@ -74,7 +74,7 @@ class Memory(object):
         xp = random.sample(self.mem, min(len(self.mem), size))
         states, actions, values, adv = [], [], [], []
         for i in range(len(xp)):
-            s, a, r, v, ad = xp[i]
+            s, a, v, ad = xp[i]
             states.append(to_tensor(s))
             actions.append(to_tensor(a))
             values.append(to_tensor(v))
@@ -83,7 +83,7 @@ class Memory(object):
         actions = torch.cat(actions, 0)
         values = torch.cat(values, 0)
         adv = torch.cat(adv, 0)
-        return states, actions, values, adv
+        return states, actions, values, adv 
 
 
 
@@ -94,10 +94,10 @@ class Net(nn.Module):
         # num_inputs (int): size of observation
         # num_outputs (int): size of action
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(num_inputs, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(num_inputs, 64)
-        self.fc4 = nn.Linear(64, 64)
+        self.fc1 = nn.Linear(num_inputs, 64) 
+        self.fc2 = nn.Linear(64, 64) 
+        self.fc3 = nn.Linear(num_inputs, 64) 
+        self.fc4 = nn.Linear(64, 64) 
 
         self.critic_linear = nn.Linear(64, 1)
         self.actor_mean = nn.Linear(64, num_outputs)
@@ -119,15 +119,15 @@ class Net(nn.Module):
     def act(self, inputs):
         x = F.relu(self.fc1(inputs))
         x = F.relu(self.fc2(x))
-        mean = F.tanh(self.actor_linear(x))
+        mean = F.tanh(self.actor_mean(x))
         log_var = self.actor_log_var.expand_as(mean)
-        variance = torch.exp(log_std)
+        variance = torch.exp(log_var)
 
         return mean, variance
 
 
     def critic(self, inputs):
-        y = F.relu(self.fc3(y))
+        y = F.relu(self.fc3(inputs))
         y = F.relu(self.fc4(y))
 
         return self.critic_linear(y)
@@ -137,30 +137,38 @@ def process_obs(obs):
     # process observation 
     return torch.Tensor(obs)
 
+def sample(mu, sigma_sq, gpu):
+    x = torch.randn(mu.size())
+    x = to_Variable(x, gpu)
+    return sigma_sq.sqrt() * x + mu
+    
+    
 
-def play(seed, args, shared_model, q, training, T, count, num_steps):
+def play(seed, args, shared_model, q, training, T, flag, num_steps):
     env = gym.make(args.env_name)
     obs = env.reset()
-    episodes = 0
+    episodes = 0 
     total = 0.
     best = 0.
     save_freq = 20
     local_model = Net(args.num_inputs, args.num_outputs)
     if args.gpu:
         local_model.cuda()
-    length = 0
-    steps = 0
+    length = 0 
+    steps = 0 
     for _ in range(args.num_iterations):
         local_model.load_state_dict(shared_model.state_dict())
         states, actions, rewards, terminal, adv, values = [], [], [], [], [], []
         for __ in range(num_steps):
+            #if False == training: env.render()
             state = process_obs(obs).unsqueeze(0)
             states.append(state.numpy())
             state = Variable(state, volatile=True)
             if args.gpu:
                 state = state.cuda()
             mu, sigma_sq = local_model.act(state)
-            values.append(to_numpy(local_model.critic(state)))
+            values.append(to_numpy(local_model.critic(state), args.gpu))
+            action = sample(mu, sigma_sq, args.gpu)
             action = to_numpy(action, args.gpu)
             actions.append(action)
             obs, reward, done, info = env.step(action[0])
@@ -182,7 +190,7 @@ def play(seed, args, shared_model, q, training, T, count, num_steps):
                 if False == training:
                     if episodes % save_freq == 0:
                         print (time.strftime('%Hh %Mm %Ss', time.localtime()), 'steps ', T.value, 'score ', total, file=open(args.results_file, 'a'))
-                        torch.save(local_model.state_dict(), args.weights_file+str(num_episodes//save_freq))
+                        torch.save(local_model.state_dict(), args.weights_file+str(episodes//save_freq))
                     if best < total:
                         torch.save(local_model.state_dict(), args.weights_file+'-best')
                         best = total
@@ -196,13 +204,13 @@ def play(seed, args, shared_model, q, training, T, count, num_steps):
         if False == done:
             s = process_obs(obs)
             if args.gpu: s = s.cuda()
-            value = model.critic(Variable(state.unsqueeze(0), volatile=True))
+            value = local_model.critic(Variable(s.unsqueeze(0), volatile=True))
             R = value.data
         R = R.numpy()
         # GAE needed?
         for i in range(len(rewards))[::-1]:
-            R = gamma * R * terminal[i] + rewards[i]
-            values_target.append[R]
+            R = args.gamma * R * terminal[i] + rewards[i]
+            values_target.append(R)
             adv_est = R - values[i]
             if args.gpu:
                 adv.append(adv_est)
@@ -218,15 +226,16 @@ def play(seed, args, shared_model, q, training, T, count, num_steps):
             q.put((states[i], actions[i], values_target[i], adv[i]))
         T.value += len(rewards)
 
-        while 0 != count.value:
-            time.sleep(0.1)
-
+        flag[seed] = True
+        while flag[seed]:
+            #time.sleep(0.1)
+            pass
     return
 
 def normal_pdf(x, mu, sigma_sq):
     a = 1/(2*np.pi*sigma_sq).sqrt()
     b = (-1.*(x-mu).pow(2)/(2*sigma_sq)).exp()
-    return a * b
+    return a * b 
 
 def train(args):
     # manage running processes
@@ -240,28 +249,28 @@ def train(args):
         model_old.cuda()
     model.share_memory()
     T = mp.Value('i', 0) # count for total number of frames 
-    count = mp.Value('i', 0) # value for synchronization
+    flags = mp.Array('b', args.num_processes+4) # flags for synchronization
+    for i in range(len(flags)):
+        flags[i] = False
     batch_size = 4096
     gamma = args.gamma
     mem = Memory(1000000)
-    num_steps = 512
+    num_steps = 10#512
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     schd = scheduler.StepLR(optimizer, step_size=1200000, gamma=0.9)
 
     process = []
-    p = mp.Process(target=play, args=(50, args, model, q, eps_args[0], False, T, count, num_steps))
+    p = mp.Process(target=play, args=(0, args, model, q, False, T, flags, num_steps))
     p.start()
     process.append(p)
     for i in range(args.num_processes):
-        p = mp.Process(target=play, args=(i, args, model, q, eps_args[i+1], True, T, count, num_steps))
+        p = mp.Process(target=play, args=(i+1, args, model, q, True, T, flags, num_steps))
         p.start()
         process.append(p)
     for _ in range(args.num_iterations):
         # collect data
-        count.value = 0
-        while count != args.num_processes + 1 or False == q.empty():
+        while sum(flags) != args.num_processes + 1 or False == q.empty():
             mem.append(q.get())
-        count.value += 1
 
         # training starts
         model_old.load_state_dict(model.state_dict())
@@ -283,16 +292,19 @@ def train(args):
             l_clip = torch.mean(torch.min(l1, l2))
             # no entropy loss for roboschool problems
             loss = l_vf - l_clip
+            print (loss)
 
             optimizer.zero_grad()
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm(model.parameters(), 40)
+            torch.nn.utils.clip_grad_norm(model.parameters(), 40) 
 
             optimizer.step()
             schd.step()
 
         mem.clear()
+        for i in range(len(flags)):
+            flags[i] = False
 
 
 
@@ -300,13 +312,13 @@ parser = argparse.ArgumentParser(description='ppo')
 parser.add_argument('--lr', type=float, default=0.00015, metavar='LR', help='learning rate')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor for rewards (default: 0.99)')
 parser.add_argument('--seed', type=int, default=41, metavar='S', help='random seed (default: 41)')
-parser.add_argument('--num-processes', type=int, default=5, metavar='NP', help='number of processes to use (default: 1)')
+parser.add_argument('--num-processes', type=int, default=1, metavar='NP', help='number of processes to use (default: 1)')
 parser.add_argument('--num-steps', type=int, default=10, metavar='NS', help='number of forward steps (default: 10)')
 parser.add_argument('--max-episode-length', type=int, default=20000, metavar='M', help='maximum length of an episode')
 parser.add_argument('--env-name', default='RoboschoolAnt-v1', metavar='ENV', help='environment to train on')
 parser.add_argument('--no-shared', default=True, metavar='SHR', help='use an optimizer without shared momentum (default: True)')
 parser.add_argument('--window', type=int, default=4, metavar='W', help='number of the input frames')
-parser.add_argument('--gpu', default=True, metavar='GPU', help='use GPU or not (default: False)')
+parser.add_argument('--gpu', default=False, metavar='GPU', help='use GPU or not (default: False)')
 parser.add_argument('--frame-size', type=int, default=80, metavar='FS', help='size of the input frame')
 parser.add_argument('--weights-file', default='ppo-weights', metavar='WF', help='file name for trained weights')
 parser.add_argument('--results-file', default='ppo-results', metavar='RF', help='file name for estimation during training')
@@ -339,3 +351,4 @@ if __name__ == '__main__':
     main()
 
 
+                      
