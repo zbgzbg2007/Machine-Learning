@@ -223,6 +223,10 @@ def play(seed, args, shared_model, q, training, T, count, num_steps):
 
     return
 
+def normal_pdf(x, mu, sigma_sq):
+    a = 1/(2*np.pi*sigma_sq).sqrt()
+    b = (-1.*(x-mu).pow(2)/(2*sigma_sq)).exp()
+    return a * b
 
 def train(args):
     # manage running processes
@@ -269,7 +273,15 @@ def train(args):
             l2 = nn.MSELoss()
             l_vf = l2(v, b_v)
 
-            l_clip =
+            mu, sigma_sq = model.act(b_s)
+            probs = normal_pdf(b_a, mu, sigma_sq)
+            mu_old, sigma_sq_old = model_old.act(b_s)
+            probs_old = normal_pdf(b_a, mu_old, sigma_sq_old)
+            ratio = probs / (probs_old + 1e-15)
+            l1 = ratio * b_ad
+            l2 = ratio.clamp(1 - args.eps, 1 + args.eps) * b_ad
+            l_clip = torch.mean(torch.min(l1, l2))
+            # no entropy loss for roboschool problems
             loss = l_vf - l_clip
 
             optimizer.zero_grad()
