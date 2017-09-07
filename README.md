@@ -9,3 +9,7 @@ Projects or classes about ML
   Enduro based on the toolkit OpenAi gym.
 
 - A3C folder includes my implementation of the asynchronous advatage actor-critic algorithm based on the Atari game Enduro.
+
+- PPO folder includes my implementation of the Proximal Policy Optimization algorithm based on Roboschool environments.
+
+- Roboschool folder includes my implementation of three different algorithms based on Roboschool environments: A3C, PPO and a variant of DDPG (deep diterministic policy gradient). These are used to compared them based on the environment in Roboschool.
