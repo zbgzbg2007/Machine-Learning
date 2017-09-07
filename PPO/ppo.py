@@ -37,23 +37,6 @@ def init_weight(layer, nonlinear):
     init.xavier_uniform(layer.weight, gain=nn.init.calculate_gain(nonlinear))
     init.constant(layer.bias, 0.) 
 
-class E_args(object):
-    def __init__(self, eps, decay, emin, sigma, t, freq, num, gpu):
-        self.eps = eps 
-        self.decay = decay
-        self.eps_min = emin
-        self.mu = to_tensor([[0.0 for i in range(num)]])
-        self.theta = to_tensor([[t for i in range(num)]])
-        self.sigma = to_tensor([[sigma for i in range(num)]])
-        self.update_freq = freq
-        self.gpu = gpu 
-        self.num_actions = num 
-        if gpu:
-            self.mu = self.mu.cuda()
-            self.theta = self.theta.cuda()
-            self.sigma = self.sigma.cuda()
-
-
 
 class Memory(object):
     def __init__(self, size):
@@ -112,7 +95,7 @@ class Net(nn.Module):
         self.actor_mean.weight.data.mul_(0.1)
         self.critic_linear.bias.data.mul_(0.0)
         self.critic_linear.weight.data.mul_(0.1)
-        self.actor_log_var = nn.Parameter(torch.zeros(1, num_outputs))
+        self.actor_log_var = nn.Parameter(torch.zeros(1, num_outputs) -0.7)
 
         self.train()
 
@@ -150,7 +133,7 @@ def play(seed, args, shared_model, q, training, T, flag, num_steps):
     episodes = 0 
     total = 0.
     best = 0.
-    save_freq = 20
+    save_freq = 5
     local_model = Net(args.num_inputs, args.num_outputs)
     if args.gpu:
         local_model.cuda()
@@ -206,16 +189,19 @@ def play(seed, args, shared_model, q, training, T, flag, num_steps):
             if args.gpu: s = s.cuda()
             value = local_model.critic(Variable(s.unsqueeze(0), volatile=True))
             R = value.data
+        if args.gpu:
+            R = R.cpu()
         R = R.numpy()
-        # GAE needed?
+        # apply GAE 
+        values.append(R)
+        gae = 0
         for i in range(len(rewards))[::-1]:
             R = args.gamma * R * terminal[i] + rewards[i]
+            delta = rewards[i] + args.gamma * values[i+1] * terminal[i] - values[i]
             values_target.append(R)
-            adv_est = R - values[i]
-            if args.gpu:
-                adv.append(adv_est)
-            else:
-                adv.append(adv_est)
+            #adv_est = R - values[i] # advantage estimator
+            gae = delta + gae * args.gamma * args.lambd 
+            adv.append(gae)
         values_target = values_target[::-1]
         adv = adv[::-1]
 
@@ -254,17 +240,19 @@ def train(args):
         flags[i] = False
     batch_size = 4096
     gamma = args.gamma
-    mem = Memory(1000000)
-    num_steps = 10#512
+    mem = Memory(100000)
+    num_steps = args.num_steps
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    schd = scheduler.StepLR(optimizer, step_size=1200000, gamma=0.9)
+    #schd = scheduler.StepLR(optimizer, step_size=1200000, gamma=0.9)
 
     process = []
     p = mp.Process(target=play, args=(0, args, model, q, False, T, flags, num_steps))
+    p.daemon=True
     p.start()
     process.append(p)
     for i in range(args.num_processes):
         p = mp.Process(target=play, args=(i+1, args, model, q, True, T, flags, num_steps))
+        p.daemon=True
         p.start()
         process.append(p)
     for _ in range(args.num_iterations):
@@ -292,42 +280,44 @@ def train(args):
             l_clip = torch.mean(torch.min(l1, l2))
             # no entropy loss for roboschool problems
             loss = l_vf - l_clip
-            print (loss)
+            #print (loss)
 
             optimizer.zero_grad()
             loss.backward()
 
-            torch.nn.utils.clip_grad_norm(model.parameters(), 40) 
+            #torch.nn.utils.clip_grad_norm(model.parameters(), 40) 
 
             optimizer.step()
-            schd.step()
+            #schd.step()
 
         mem.clear()
-        for i in range(len(flags)):
-            flags[i] = False
+        model.actor_log_var.data -= 1e-3
+        for j in range(len(flags)):
+            flags[j] = False
 
 
 
 parser = argparse.ArgumentParser(description='ppo')
-parser.add_argument('--lr', type=float, default=0.00015, metavar='LR', help='learning rate')
+parser.add_argument('--lr', type=float, default=0.0002, metavar='LR', help='learning rate')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor for rewards (default: 0.99)')
 parser.add_argument('--seed', type=int, default=41, metavar='S', help='random seed (default: 41)')
-parser.add_argument('--num-processes', type=int, default=1, metavar='NP', help='number of processes to use (default: 1)')
-parser.add_argument('--num-steps', type=int, default=10, metavar='NS', help='number of forward steps (default: 10)')
+parser.add_argument('--num-processes', type=int, default=8, metavar='NP', help='number of processes to use (default: 1)')
+parser.add_argument('--num-steps', type=int, default=2048, metavar='NS', help='number of forward steps (default: 10)')
 parser.add_argument('--max-episode-length', type=int, default=20000, metavar='M', help='maximum length of an episode')
-parser.add_argument('--env-name', default='RoboschoolAnt-v1', metavar='ENV', help='environment to train on')
+parser.add_argument('--env-name', default='RoboschoolHumanoid-v1', metavar='ENV', help='environment to train on')
 parser.add_argument('--no-shared', default=True, metavar='SHR', help='use an optimizer without shared momentum (default: True)')
 parser.add_argument('--window', type=int, default=4, metavar='W', help='number of the input frames')
-parser.add_argument('--gpu', default=False, metavar='GPU', help='use GPU or not (default: False)')
+parser.add_argument('--gpu', default=True, metavar='GPU', help='use GPU or not (default: False)')
 parser.add_argument('--frame-size', type=int, default=80, metavar='FS', help='size of the input frame')
 parser.add_argument('--weights-file', default='ppo-weights', metavar='WF', help='file name for trained weights')
 parser.add_argument('--results-file', default='ppo-results', metavar='RF', help='file name for estimation during training')
 parser.add_argument('--tau', type=float, default=0.0001, metavar='T')
-parser.add_argument('--num-inputs', type=int, default=28, metavar='NIP', help='number (size) of inputs')
-parser.add_argument('--num-outputs', type=int, default=8, metavar='NOP', help='number (size) of outputs')
-parser.add_argument('--num-iterations', type=int, default=100000, metavar='NIT', help='number of iterations to run')
+parser.add_argument('--num-inputs', type=int, default=44, metavar='NIP', help='number (size) of inputs')
+parser.add_argument('--num-outputs', type=int, default=17, metavar='NOP', help='number (size) of outputs')
+parser.add_argument('--num-iterations', type=int, default=1000000, metavar='NIT', help='number of iterations to run')
 parser.add_argument('--eps', type=float, default=0.2, metavar='EPS', help='parameter for clipping the loss')
-parser.add_argument('--num-epochs', type=int, default=15, metavar='NE', help='number of epochs for training')
+parser.add_argument('--lambd', type=float, default=0.95, metavar='LAM', help='Generalized Advantage Estimator (GAE) parameter')
+parser.add_argument('--num-epochs', type=int, default=20, metavar='NE', help='number of epochs for training')
 
 
 def main():
@@ -352,3 +342,4 @@ if __name__ == '__main__':
 
 
                       
+
