@@ -93,13 +93,13 @@ class Net(nn.Module):
         # num_inputs (int): size of observation
         # num_outputs (int): size of action
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(num_inputs, 64)
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(num_inputs+num_outputs, 64)
-        self.fc4 = nn.Linear(64, 64)
+        self.fc1 = nn.Linear(num_inputs, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(num_inputs+num_outputs, 256)
+        self.fc4 = nn.Linear(256, 128)
 
-        self.critic_linear = nn.Linear(64, 1)
-        self.actor_linear = nn.Linear(64, num_outputs)
+        self.critic_linear = nn.Linear(128, 1)
+        self.actor_linear = nn.Linear(128, num_outputs)
 
         init_weight(self.fc1, 'relu')
         init_weight(self.fc2, 'relu')
@@ -145,6 +145,10 @@ def explore(action, eps_args):
 
 
 def play(seed, args, shared_model, q=None, eps_args=None, training=False, T=None, num_steps=10000000):
+    if args.gpu:
+        torch.cuda.manual_seed(seed)
+    else:
+        torch.manual_seed(seed)
     env = gym.make(args.env_name)
     obs = env.reset()
     num_episodes = 0
@@ -217,7 +221,7 @@ def soft_update(s, t, tau):
 
 def manager(args):
     # manage running processes
-    q = mp.Queue(1000)
+    q = mp.Queue(5000)
     model = Net(args.num_inputs, args.num_outputs)
     print (model, file=open(args.results_file, 'a'))
     #model.load_state_dict(torch.load('weights16_addpg'))
@@ -231,8 +235,8 @@ def manager(args):
     T = mp.Value('i', 0) # count for total number of frames 
     
     eps = [1, 0.6, 0.7, 0.8, 0.9, 1., 0.85, 0.4, 0.8, 0.7, 0.1]
-    eps_min = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.8, 0.7, 0.1]
-    decay = [1e-3, 1e-6, 1e-6, 2e-6, 2e-6, 2e-6, 2e-5, 3e-5, 4e-5, 2e-5]
+    eps_min = [0.0, 0.0, 0.1, 0.15, 0.05, 0.0, 0.15, 0.8, 0.7, 0.1]
+    decay = [1e-4, 1e-6, 1e-6, 1e-6, 1e-6, 2e-6, 2e-6, 3e-5, 4e-5, 2e-5]
     sigma = [0.1, 0.15, 0.25, 0.35, 0.45, 0.5, 0.1, 0.2, 0.05, 0.03]
     update_freq = [10, 20, 30, 40, 50, 50, 90, 100]
     theta = [0.65, 0.6, 0.7, 0.8, 0.9, 0.8, 0.7, 0.6]
@@ -256,13 +260,13 @@ def manager(args):
 
 
 def train(args, model, target_model, q):
-    batch_size = 1024 
+    batch_size = 4096 
     gamma = 0.99
-    mem = Memory(100000)
+    mem = Memory(1000000)
     actor_optim = optim.Adam([{'params': model.fc1.parameters()}, {'params': model.fc2.parameters()}, {'params': model.actor_linear.parameters()}], lr=args.lr)
     critic_optim = optim.Adam([{'params': model.fc3.parameters()}, {'params': model.fc4.parameters()}, {'params': model.critic_linear.parameters()}], lr=args.lr)
-    actor_optim = scheduler.StepLR(actor_optim, step_size=1200000, gamma=0.9)
-    critic_optim = scheduler.StepLR(critic_optim, step_size=1200000, gamma=0.9)
+    actor_optim = scheduler.StepLR(actor_optim, step_size=1000000, gamma=0.9)
+    critic_optim = scheduler.StepLR(critic_optim, step_size=1000000, gamma=0.9)
     while True: 
         # add more replay
         count = 0
@@ -301,27 +305,25 @@ def train(args, model, target_model, q):
             soft_update(model, target_model, args.tau)
 
         else:
-            time.sleep(0.1)
+            pass
         
        
   
                                                                              
 
-parser = argparse.ArgumentParser(description='addpg')
+parser = argparse.ArgumentParser(description='bddpg')
 parser.add_argument('--lr', type=float, default=0.0002, metavar='LR', help='learning rate')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor for rewards (default: 0.99)')
 parser.add_argument('--seed', type=int, default=41, metavar='S', help='random seed (default: 41)')
-parser.add_argument('--num-processes', type=int, default=5, metavar='NP', help='number of processes to use (default: 1)')
+parser.add_argument('--num-processes', type=int, default=6, metavar='NP', help='number of processes to use (default: 1)')
 parser.add_argument('--num-steps', type=int, default=10, metavar='NS', help='number of forward steps (default: 10)')
 parser.add_argument('--max-episode-length', type=int, default=20000, metavar='M', help='maximum length of an episode')
 parser.add_argument('--env-name', default='RoboschoolHumanoid-v1', metavar='ENV', help='environment to train on')
 parser.add_argument('--no-shared', default=True, metavar='SHR', help='use an optimizer without shared momentum (default: True)')
-parser.add_argument('--window', type=int, default=4, metavar='W', help='number of the input frames')
 parser.add_argument('--gpu', default=True, metavar='GPU', help='use GPU or not (default: False)')
-parser.add_argument('--frame-size', type=int, default=80, metavar='FS', help='size of the input frame')
-parser.add_argument('--weights-file', default='addpg-weights', metavar='WF', help='file name for trained weights')
-parser.add_argument('--results-file', default='addpg-results', metavar='RF', help='file name for estimation during training')
-parser.add_argument('--tau', type=float, default=0.0001, metavar='T')
+parser.add_argument('--weights-file', default='bddpg-weights', metavar='WF', help='file name for trained weights')
+parser.add_argument('--results-file', default='bddpg-results', metavar='RF', help='file name for estimation during training')
+parser.add_argument('--tau', type=float, default=0.0001, metavar='T', help='parameter for soft updating target network')
 parser.add_argument('--num-inputs', type=int, default=44, metavar='NIP', help='number (size) of inputs')
 parser.add_argument('--num-outputs', type=int, default=17, metavar='NOP', help='number (size) of outputs')
 
