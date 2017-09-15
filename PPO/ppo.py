@@ -52,6 +52,19 @@ class Memory(object):
     def clear(self):
         self.mem.clear()
 
+    def stand_adv(self):
+        # standardized advantage function estimate
+        adv = []
+        for x in self.mem:
+            s, a, v, ad = x
+            adv.append(ad)
+        adv = np.concatenate(adv, axis=0)
+        adv = (adv - adv.mean()) / adv.std()
+        for i in range(len(self.mem)):
+            s, a, v, ad = self.mem[i]
+            ad = adv[None, i]
+            self.mem[i] = (s, a, v, ad)
+
     def sample(self, size):
         # return tensors
         xp = random.sample(self.mem, min(len(self.mem), size))
@@ -77,13 +90,13 @@ class Net(nn.Module):
         # num_inputs (int): size of observation
         # num_outputs (int): size of action
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(num_inputs, 64) 
-        self.fc2 = nn.Linear(64, 64) 
-        self.fc3 = nn.Linear(num_inputs, 64) 
-        self.fc4 = nn.Linear(64, 64) 
+        self.fc1 = nn.Linear(num_inputs, 256) 
+        self.fc2 = nn.Linear(256, 128) 
+        self.fc3 = nn.Linear(num_inputs, 256) 
+        self.fc4 = nn.Linear(256, 128) 
 
-        self.critic_linear = nn.Linear(64, 1)
-        self.actor_mean = nn.Linear(64, num_outputs)
+        self.critic_linear = nn.Linear(128, 1)
+        self.actor_mean = nn.Linear(128, num_outputs)
 
         init_weight(self.fc1, 'relu')
         init_weight(self.fc2, 'relu')
@@ -91,11 +104,11 @@ class Net(nn.Module):
         init_weight(self.fc4, 'relu')
         init_weight(self.critic_linear, 'linear')
         init_weight(self.actor_mean, 'tanh')
-        self.actor_mean.bias.data.mul_(0.0)
-        self.actor_mean.weight.data.mul_(0.1)
-        self.critic_linear.bias.data.mul_(0.0)
-        self.critic_linear.weight.data.mul_(0.1)
-        self.actor_log_var = nn.Parameter(torch.zeros(1, num_outputs) -0.7)
+        #self.actor_mean.bias.data.mul_(0.0)
+        #self.actor_mean.weight.data.mul_(0.1)
+        #self.critic_linear.bias.data.mul_(0.0)
+        #self.critic_linear.weight.data.mul_(0.1)
+        self.actor_log_var = nn.Parameter(torch.zeros(1, num_outputs)-1.5)
 
         self.train()
 
@@ -118,7 +131,7 @@ class Net(nn.Module):
 
 def process_obs(obs):
     # process observation 
-    return torch.Tensor(obs)
+    return torch.clamp(torch.Tensor(obs)*0.5, -1., 1.)
 
 def sample(mu, sigma_sq, gpu):
     x = torch.randn(mu.size())
@@ -127,13 +140,16 @@ def sample(mu, sigma_sq, gpu):
     
     
 
-def play(seed, args, shared_model, q, training, T, flag, num_steps):
+def play(seed, args, shared_model, q, T, flag, num_steps):
+    if args.gpu:
+        torch.cuda.manual_seed(seed)
+    else:
+        torch.manual_seed(seed)
     env = gym.make(args.env_name)
     obs = env.reset()
     episodes = 0 
     total = 0.
     best = 0.
-    save_freq = 5
     local_model = Net(args.num_inputs, args.num_outputs)
     if args.gpu:
         local_model.cuda()
@@ -143,7 +159,6 @@ def play(seed, args, shared_model, q, training, T, flag, num_steps):
         local_model.load_state_dict(shared_model.state_dict())
         states, actions, rewards, terminal, adv, values = [], [], [], [], [], []
         for __ in range(num_steps):
-            #if False == training: env.render()
             state = process_obs(obs).unsqueeze(0)
             states.append(state.numpy())
             state = Variable(state, volatile=True)
@@ -170,13 +185,6 @@ def play(seed, args, shared_model, q, training, T, flag, num_steps):
             if done:
                 obs = env.reset()
                 episodes += 1
-                if False == training:
-                    if episodes % save_freq == 0:
-                        print (time.strftime('%Hh %Mm %Ss', time.localtime()), 'steps ', T.value, 'score ', total, file=open(args.results_file, 'a'))
-                        torch.save(local_model.state_dict(), args.weights_file+str(episodes//save_freq))
-                    if best < total:
-                        torch.save(local_model.state_dict(), args.weights_file+'-best')
-                        best = total
                 length, total = 0, 0
 
         # compute advantage function
@@ -196,27 +204,51 @@ def play(seed, args, shared_model, q, training, T, flag, num_steps):
         values.append(R)
         gae = 0
         for i in range(len(rewards))[::-1]:
-            R = args.gamma * R * terminal[i] + rewards[i]
-            delta = rewards[i] + args.gamma * values[i+1] * terminal[i] - values[i]
-            values_target.append(R)
+            #R = args.gamma * R * terminal[i] + rewards[i]
+            #values_target.append(R)
             #adv_est = R - values[i] # advantage estimator
-            gae = delta + gae * args.gamma * args.lambd 
+            #adv.append(adv_est)
+            delta = rewards[i] + args.gamma * values[i+1] * terminal[i] - values[i]
+            gae = delta + gae * args.gamma * args.lambd * terminal[i]
             adv.append(gae)
-        values_target = values_target[::-1]
+            # value target computed from advantage estimator
+            values_target.append(values[i]+gae)
         adv = adv[::-1]
+        values_target = values_target[::-1]
 
         # send data
         for i in range(len(rewards)):
             if q.full():
                 time.sleep(0.1)
             q.put((states[i], actions[i], values_target[i], adv[i]))
-        T.value += len(rewards)
+        with T.get_lock():
+            T.value += len(rewards)
 
         flag[seed] = True
         while flag[seed]:
             #time.sleep(0.1)
             pass
     return
+
+def evaluate(model, args, env, T, num_id):
+    obs = env.reset()
+    done = False
+    total = 0.
+    while done == False:
+        state = process_obs(obs).unsqueeze(0)
+        state = Variable(state, volatile=True)
+        if args.gpu:
+            state = state.cuda()
+        mu, sigma_sq = model.act(state)
+        #action = sample(mu, sigma_sq, args.gpu)
+        #action = to_numpy(action, args.gpu)
+        action = to_numpy(mu, args.gpu)
+        obs, reward, done, info = env.step(action[0])
+        total += reward
+
+        #env.render()
+    print (time.strftime('%Hh %Mm %Ss', time.localtime()), 'steps ', T.value, 'score ', total, file=open(args.results_file, 'a'))
+    torch.save(model.state_dict(), args.weights_file+str(num_id))
 
 def normal_pdf(x, mu, sigma_sq):
     a = 1/(2*np.pi*sigma_sq).sqrt()
@@ -239,29 +271,28 @@ def train(args):
     for i in range(len(flags)):
         flags[i] = False
     batch_size = 4096
-    gamma = args.gamma
+    eps = args.eps
+    decay = 1./args.num_iterations
     mem = Memory(100000)
     num_steps = args.num_steps
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    #schd = scheduler.StepLR(optimizer, step_size=1200000, gamma=0.9)
+    schd = scheduler.StepLR(optimizer, step_size=500, gamma=0.95)
+    env = gym.make(args.env_name)
 
     process = []
-    p = mp.Process(target=play, args=(0, args, model, q, False, T, flags, num_steps))
-    p.daemon=True
-    p.start()
-    process.append(p)
     for i in range(args.num_processes):
-        p = mp.Process(target=play, args=(i+1, args, model, q, True, T, flags, num_steps))
+        p = mp.Process(target=play, args=(i, args, model, q, T, flags, num_steps))
         p.daemon=True
         p.start()
         process.append(p)
-    for _ in range(args.num_iterations):
+    for i in range(args.num_iterations):
         # collect data
-        while sum(flags) != args.num_processes + 1 or False == q.empty():
+        while sum(flags) != args.num_processes or False == q.empty():
             mem.append(q.get())
 
         # training starts
         model_old.load_state_dict(model.state_dict())
+        mem.stand_adv()
         for __ in range(args.num_epochs):
             b_s, b_a, b_v, b_ad = mem.sample(batch_size)
             b_s, b_a, b_v, b_ad = to_Variable(b_s, args.gpu), to_Variable(b_a, args.gpu), to_Variable(b_v, args.gpu), to_Variable(b_ad, args.gpu)
@@ -276,7 +307,7 @@ def train(args):
             probs_old = normal_pdf(b_a, mu_old, sigma_sq_old)
             ratio = probs / (probs_old + 1e-15)
             l1 = ratio * b_ad
-            l2 = ratio.clamp(1 - args.eps, 1 + args.eps) * b_ad
+            l2 = ratio.clamp(1 - eps, 1 + eps) * b_ad
             l_clip = torch.mean(torch.min(l1, l2))
             # no entropy loss for roboschool problems
             loss = l_vf - l_clip
@@ -288,36 +319,37 @@ def train(args):
             #torch.nn.utils.clip_grad_norm(model.parameters(), 40) 
 
             optimizer.step()
-            #schd.step()
+
+        schd.step()
 
         mem.clear()
-        model.actor_log_var.data -= 1e-3
+        eps = max(0.05, eps-decay)
+        model.actor_log_var.data -= 2e-4
+        
         for j in range(len(flags)):
             flags[j] = False
+        if 0 == i % 4:
+            evaluate(model, args, env, T, i//4)
 
 
 
 parser = argparse.ArgumentParser(description='ppo')
-parser.add_argument('--lr', type=float, default=0.0002, metavar='LR', help='learning rate')
+parser.add_argument('--lr', type=float, default=0.0003, metavar='LR', help='learning rate')
 parser.add_argument('--gamma', type=float, default=0.99, metavar='G', help='discount factor for rewards (default: 0.99)')
 parser.add_argument('--seed', type=int, default=41, metavar='S', help='random seed (default: 41)')
 parser.add_argument('--num-processes', type=int, default=8, metavar='NP', help='number of processes to use (default: 1)')
-parser.add_argument('--num-steps', type=int, default=2048, metavar='NS', help='number of forward steps (default: 10)')
+parser.add_argument('--num-steps', type=int, default=2048, metavar='NS', help='number of forward steps')
 parser.add_argument('--max-episode-length', type=int, default=20000, metavar='M', help='maximum length of an episode')
 parser.add_argument('--env-name', default='RoboschoolHumanoid-v1', metavar='ENV', help='environment to train on')
-parser.add_argument('--no-shared', default=True, metavar='SHR', help='use an optimizer without shared momentum (default: True)')
-parser.add_argument('--window', type=int, default=4, metavar='W', help='number of the input frames')
 parser.add_argument('--gpu', default=True, metavar='GPU', help='use GPU or not (default: False)')
-parser.add_argument('--frame-size', type=int, default=80, metavar='FS', help='size of the input frame')
 parser.add_argument('--weights-file', default='ppo-weights', metavar='WF', help='file name for trained weights')
 parser.add_argument('--results-file', default='ppo-results', metavar='RF', help='file name for estimation during training')
-parser.add_argument('--tau', type=float, default=0.0001, metavar='T')
 parser.add_argument('--num-inputs', type=int, default=44, metavar='NIP', help='number (size) of inputs')
 parser.add_argument('--num-outputs', type=int, default=17, metavar='NOP', help='number (size) of outputs')
-parser.add_argument('--num-iterations', type=int, default=1000000, metavar='NIT', help='number of iterations to run')
+parser.add_argument('--num-iterations', type=int, default=100000, metavar='NIT', help='number of iterations to run')
 parser.add_argument('--eps', type=float, default=0.2, metavar='EPS', help='parameter for clipping the loss')
 parser.add_argument('--lambd', type=float, default=0.95, metavar='LAM', help='Generalized Advantage Estimator (GAE) parameter')
-parser.add_argument('--num-epochs', type=int, default=20, metavar='NE', help='number of epochs for training')
+parser.add_argument('--num-epochs', type=int, default=15, metavar='NE', help='number of epochs for training')
 
 
 def main():
