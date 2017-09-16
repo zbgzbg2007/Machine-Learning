@@ -70,7 +70,7 @@ def process_obs(obs):
 env = gym.make('RoboschoolAnt-v1')
 obs = env.reset()
 model = Net(28, 8)
-model.load_state_dict(torch.load('weights-ant'))
+model.load_state_dict(torch.load('weights-ant', , map_location=lambda storage, loc:storage))
 #for _ in range(1000):
 while True:
     env.render()
