@@ -33,50 +33,72 @@ def init_weight(layer, nonlinear):
     # initialize weights
     init.xavier_uniform(layer.weight, gain=nn.init.calculate_gain(nonlinear))
     init.constant(layer.bias, 0.) 
-
 class Net(nn.Module):
     def __init__(self, num_inputs, num_outputs):
         # num_inputs (int): size of observation
         # num_outputs (int): size of action
         super(Net, self).__init__()
-        self.fc1 = nn.Linear(num_inputs, 300)
-        self.fc2 = nn.Linear(300, 600)
-        self.fc3 = nn.Linear(num_inputs+num_outputs, 300)
-        self.fc4 = nn.Linear(300, 600)
+        self.fc1 = nn.Linear(num_inputs, 256)
+        self.fc2 = nn.Linear(256, 128)
+        self.fc3 = nn.Linear(num_inputs, 256)
+        self.fc4 = nn.Linear(256, 128)
 
-        self.critic_linear = nn.Linear(600, 1)
-        self.actor_linear = nn.Linear(600, num_outputs)
+        self.critic_linear = nn.Linear(128, 1)
+        self.actor_mean = nn.Linear(128, num_outputs)
 
         init_weight(self.fc1, 'relu')
         init_weight(self.fc2, 'relu')
         init_weight(self.fc3, 'relu')
         init_weight(self.fc4, 'relu')
         init_weight(self.critic_linear, 'linear')
-        init_weight(self.actor_linear, 'tanh')
+        init_weight(self.actor_mean, 'tanh')
+        #self.actor_mean.bias.data.mul_(0.0)
+        #self.actor_mean.weight.data.mul_(0.1)
+        #self.critic_linear.bias.data.mul_(0.0)
+        #self.critic_linear.weight.data.mul_(0.1)
+        self.actor_log_var = nn.Parameter(torch.zeros(1, num_outputs)-1.5)
 
         self.train()
+
     def act(self, inputs):
         x = F.relu(self.fc1(inputs))
         x = F.relu(self.fc2(x))
-        action = F.tanh(self.actor_linear(x))
-        return action
+        mean = F.tanh(self.actor_mean(x))
+        log_var = self.actor_log_var.expand_as(mean)
+        variance = torch.exp(log_var)
+
+        return mean, variance
+
+
+    def critic(self, inputs):
+        y = F.relu(self.fc3(inputs))
+        y = F.relu(self.fc4(y))
+
+        return self.critic_linear(y)
 
 def process_obs(obs):
     # process observation 
-    return torch.Tensor(obs)
+    return torch.clamp(torch.Tensor(obs)*0.5, -1., 1.)
+
 
 
 #from OpenGL import GLU
-env = gym.make('RoboschoolAnt-v1')
+env = gym.make('RoboschoolHumanoid-v1')
 obs = env.reset()
-model = Net(28, 8)
-model.load_state_dict(torch.load('weights-ant', , map_location=lambda storage, loc:storage))
+model = Net(44, 17)
+model.load_state_dict(torch.load('weights3-humanoid', map_location=lambda storage, loc:storage))
 #for _ in range(1000):
+total = 0
 while True:
-    env.render()
+    #env.render()
     state = process_obs(obs).unsqueeze(0)
     state = Variable(state, volatile=True)
-    action = model.act(state)
-    action = to_numpy(action, False)
+    mu, sgm = model.act(state)
+    action = to_numpy(mu, False)
     obs, reward, done, info = env.step(action[0])
-    if done: obs = env.reset()
+    total += reward
+    if done:
+        obs = env.reset()
+        print (total)
+        total = 0
+
